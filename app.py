@@ -175,6 +175,7 @@ def check(path):
 
 get_model()
 
+port = 5000
 datetime
 @app.route("/predict", methods=['GET', 'POST'])
 def predict():
@@ -590,5 +591,4 @@ def get_unread_notifications_count(user_id):
     return count
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  
-    app.run(debug=True, port=port, host='0.0.0.0')  
+       app.run(debug=True, port=port) 
