@@ -590,6 +590,6 @@ def get_unread_notifications_count(user_id):
     count = db.execute('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', (user_id,)).fetchone()[0]
     return count
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  
-    app.run(debug=True, port=port, host='0.0.0.0')  
+    if __name__ == "__main__":
+    
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))  
