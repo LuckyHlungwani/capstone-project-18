@@ -591,5 +591,8 @@ def get_unread_notifications_count(user_id):
     return count
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(debug=True, host='127.0.0.1', port=port)
+    port = int(os.environ.get("PORT", 5000))
+    
+    host = '0.0.0.0' if os.environ.get("RENDER") else '127.0.0.1'
+    
+    app.run(host=host, port=port)
