@@ -36,8 +36,6 @@ QUERIES = [
             'fungal disease in crops',
             'viral infections in plants',
             'crop rotation benefits',
-            'integrated pest management',
-            'biological control in agriculture',
             'sustainable farming practices',
             'remote sensing for crop disease',
             'how to prevent common rust in maize',
@@ -47,18 +45,9 @@ QUERIES = [
             'machine learning for pest management',
             'precision agriculture techniques',
             'smart farming solutions',
-            'IoT applications in agriculture',
-            'genetic engineering for disease resistance',
             'blockchain for agricultural supply chains',
             'data analytics in crop management',
             'mobile apps for pest identification',
-            'satellite imaging for crop health monitoring',
-            'automated disease forecasting systems',
-            '3D printing in agricultural equipment',
-            'nanotechnology in crop protection',
-            'robotics in sustainable farming',
-            'biopesticides and their application',
-            'chemical-free crop disease solutions'
 ]
 
 @app.route('/api/fetch_videos', methods=['GET'])
@@ -175,7 +164,6 @@ def check(path):
 
 get_model()
 
-port = 5000
 datetime
 @app.route("/predict", methods=['GET', 'POST'])
 def predict():
@@ -239,19 +227,24 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-
         db = get_db()
         user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-
         if user and check_password_hash(user['password'], password):
+            session.clear()  # Clear existing session data
             session['user_id'] = user['id']
             session['username'] = username
-            # flash('You have logged in successfully!', 'success')
             return redirect(url_for('home'))
         else:
             flash('Invalid username or password. Please try again.', 'danger')
-    
     return render_template('login.html')
+
+@app.before_request
+def load_logged_in_user():
+    user_id = session.get('user_id')
+    if user_id is None:
+        g.user = None
+    else:
+        g.user = get_db().execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
 
 @app.route('/forgot_password', methods=['GET', 'POST'])
 def forgot_password():
@@ -441,7 +434,6 @@ def community():
         JOIN users ON discussions.user_id = users.id 
         ORDER BY timestamp DESC
     ''').fetchall()
-
     discussion_list = []
     for discussion in discussions:
         comments = db.execute('''
@@ -460,7 +452,6 @@ def community():
             'timestamp': discussion['timestamp'],
             'comments': comments
         })
-
     return render_template('community.html', discussions=discussion_list)
 
 @app.route('/add_discussion', methods=['POST'])
@@ -470,38 +461,43 @@ def add_discussion():
         username = session['username']
         topic = request.form['topic']
         discussion = request.form['discussion']
-        timestamp = datetime.now()
-
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         db = get_db()
-        db.execute('INSERT INTO discussions (user_id, topic, discussion, timestamp) VALUES (?, ?, ?, ?)', 
+        db.execute('INSERT INTO discussions (user_id, topic, discussion, timestamp) VALUES (?, ?, ?, ?)',
                    (user_id, topic, discussion, timestamp))
         db.commit()
-
-        # Notify all users
+        # Notify other users
         users = db.execute('SELECT id FROM users WHERE id != ?', (user_id,)).fetchall()
         for user in users:
-            add_notification(user['id'], f'New discussion "{topic}" posted by {username}')
-        
-        # flash('Discussion posted successfully!', 'success')
-    # else:
-    #     flash('You must be logged in to post a discussion.', 'danger')
+            message = f'New discussion "{topic}" posted by {username}'
+            add_notification(user['id'], message, username, timestamp)
+        flash('Discussion posted successfully!', 'success')
+    else:
+        flash('You must be logged in to post a discussion.', 'danger')
     return redirect(url_for('community'))
 
 @app.route('/add_comment/<int:discussion_id>', methods=['POST'])
 def add_comment(discussion_id):
     if 'user_id' in session:
         user_id = session['user_id']
+        username = session['username']
         comment = request.form['comment']
-        timestamp = datetime.now()
-
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         db = get_db()
-        db.execute('INSERT INTO comments (user_id, discussion_id, comment, timestamp) VALUES (?, ?, ?, ?)', 
+        db.execute('INSERT INTO comments (user_id, discussion_id, comment, timestamp) VALUES (?, ?, ?, ?)',
                    (user_id, discussion_id, comment, timestamp))
         db.commit()
-
-        # flash('Comment added successfully!', 'success')
-    # else:
-    #     flash('You must be logged in to comment.', 'danger')
+        
+        # Notify all users except the commenter
+        users = db.execute('SELECT id FROM users WHERE id != ?', (user_id,)).fetchall()
+        discussion = db.execute('SELECT topic FROM discussions WHERE id = ?', (discussion_id,)).fetchone()
+        for user in users:
+            message = f'{username} commented on "{discussion["topic"]}"'
+            add_notification(user['id'], message, discussion_id, timestamp)
+        
+        flash('Comment added successfully!', 'success')
+    else:
+        flash('You must be logged in to comment.', 'danger')
     return redirect(url_for('community'))
 
 
@@ -564,35 +560,51 @@ def delete_account():
         flash('You need to be logged in to delete your account.', 'danger')
         return redirect(url_for('login'))
 
-
-# Add a function to add a notification
-def add_notification(user_id, message):
+def add_notification(user_id, message, discussion_id, timestamp):
     db = get_db()
-    timestamp = datetime.now()  # Get the current datetime
-    db.execute('INSERT INTO notifications (user_id, message, timestamp) VALUES (?, ?, ?)', (user_id, message, timestamp))
-    db.commit()
+    
+    # Check if a similar notification already exists
+    existing_notification = db.execute(
+        'SELECT * FROM notifications WHERE user_id = ? AND message = ? AND discussion_id = ?',
+        (user_id, message, discussion_id)
+    ).fetchone()
+    
+    # Only add a new notification if it doesn't already exist
+    if existing_notification is None:
+        db.execute(
+            'INSERT INTO notifications (user_id, message, discussion_id, timestamp) VALUES (?, ?, ?, ?)',
+            (user_id, message, discussion_id, timestamp)
+        )
+        db.commit()
 
-# Fetch notifications for a user
+
 # Fetch notifications for a user
 @app.route('/notifications')
 def notifications():
     if 'user_id' in session:
         user_id = session['user_id']
         db = get_db()
-        notifications = db.execute('SELECT * FROM notifications WHERE user_id = ? ORDER BY timestamp DESC LIMIT 10', (user_id,)).fetchall()
-        return render_template('notifications.html', notifications=notifications)
+        
+        # Mark all unread notifications as read
+        db.execute('UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0', (user_id,))
+        db.commit()
+
+        notifications = db.execute('SELECT * FROM notifications WHERE user_id = ? ORDER BY timestamp DESC', (user_id,)).fetchall()
+        unread_count = get_unread_notifications_count(user_id)
+        
+        return render_template('notifications.html', notifications=notifications, unread_count=unread_count)
     else:
         flash('You need to be logged in to view notifications.', 'danger')
         return redirect(url_for('login'))
+
 
 def get_unread_notifications_count(user_id):
     db = get_db()
     count = db.execute('SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read = 0', (user_id,)).fetchone()[0]
     return count
 
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    
-    host = '0.0.0.0' if os.environ.get("RENDER") else '127.0.0.1'
-    
-    app.run(host=host, port=port)
+    port = int(os.getenv("PORT", 5000))
+    app.run(debug=True, host='127.0.0.1', port=port)
